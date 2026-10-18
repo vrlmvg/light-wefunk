@@ -111,7 +111,7 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeVi
 
         WefunkTheme {
             Column(modifier = Modifier.fillMaxSize()) {
-                TopBar("WEFUNK", onBack = null)
+                TopBar("Wefunk Radio", onBack = null)
                 when {
                     latest == null && loadError -> CenteredMessage("Couldn't reach WEFUNK. Check your connection.", "TRY AGAIN", viewModel::load)
                     latest == null -> CenteredMessage("Loading…")
