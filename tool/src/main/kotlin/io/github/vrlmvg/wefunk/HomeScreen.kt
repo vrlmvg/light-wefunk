@@ -29,7 +29,7 @@ import kotlinx.coroutines.launch
 
 class HomeViewModel : LightViewModel<Unit>() {
     val latest = MutableStateFlow<ShowPage?>(null)
-    val radio = MutableStateFlow<RadioNow?>(null)
+    val radio = MutableStateFlow<LiveMoment?>(null)
     val loadError = MutableStateFlow(false)
     val message = MutableStateFlow<String?>(null)
     private var radioPoll: Job? = null
@@ -49,9 +49,10 @@ class HomeViewModel : LightViewModel<Unit>() {
         super.onScreenShow(screen)
         radioPoll?.cancel()
         radioPoll = viewModelScope.launch {
+            // Ticks locally; WefunkRadio only goes to the network when its schedule runs out.
             while (isActive) {
-                runCatching { WefunkApi.radioNow() }.onSuccess { radio.value = it }
-                delay(30_000)
+                radio.value = WefunkRadio.at()
+                delay(5_000)
             }
         }
     }
@@ -124,9 +125,7 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeVi
                         SectionLabel("Radio")
                         ListRow(
                             title = "Listen live",
-                            subtitle = radio?.let { r ->
-                                r.show.tracks.getOrNull(r.show.trackIndexAt(r.positionAt(System.currentTimeMillis())))?.text
-                            } ?: "Continuous stream of WEFUNK shows",
+                            subtitle = radio?.track?.text ?: "Continuous stream of WEFUNK shows",
                             onClick = ::listenToRadio,
                         )
                         SectionLabel("Latest shows")

@@ -3,6 +3,7 @@ package io.github.vrlmvg.wefunk
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** Fixtures are real wefunkradio.com pages saved on 2026-10-17. */
@@ -61,5 +62,24 @@ class WefunkParserTest {
         assertEquals(radio.positionMs + 5_000, radio.positionAt(6_000))
         val current = radio.show.tracks[radio.show.trackIndexAt(radio.positionMs)]
         assertTrue(current.text.isNotBlank())
+    }
+
+    @Test
+    fun radioScheduleCoversTheNextShow() {
+        // The fixture is 5,116,000 ms into show 1310 (7,231,000 ms); show 534 (7,193,756 ms) follows.
+        val radio = WefunkParser.parseRadio(fixture("radio-json2.json"), fetchedAtMs = 0)
+        assertEquals(534, radio.next?.number)
+        assertEquals(7_193_756, radio.next?.durationMs)
+        assertTrue(radio.next!!.tracks.isNotEmpty())
+
+        val untilCurrentEnds = 7_231_000L - 5_116_000L
+        assertEquals(1310, radio.at(untilCurrentEnds - 1)?.show?.number)
+        val onNext = radio.at(untilCurrentEnds + 60_000)!!
+        assertEquals(534, onNext.show.number)
+        assertEquals(60_000, onNext.positionMs)
+
+        // Fetch again only once the next show has played too.
+        assertEquals(untilCurrentEnds + 7_193_756, radio.refreshAtMs)
+        assertNull(radio.at(radio.refreshAtMs))
     }
 }

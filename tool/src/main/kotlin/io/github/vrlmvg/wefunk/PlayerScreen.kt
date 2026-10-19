@@ -104,16 +104,11 @@ class PlayerScreen(sealedActivity: SealedLightActivity) : SimpleLightScreen<Unit
 
     @Composable
     private fun androidx.compose.foundation.layout.ColumnScope.RadioContent(isPlaying: Boolean) {
-        var radio by remember { mutableStateOf<RadioNow?>(null) }
-        var now by remember { mutableStateOf(System.currentTimeMillis()) }
+        var radio by remember { mutableStateOf<LiveMoment?>(null) }
         LaunchedEffect(Unit) {
-            var lastFetch = 0L
+            // Ticks locally; WefunkRadio only goes to the network when its schedule runs out.
             while (true) {
-                now = System.currentTimeMillis()
-                if (now - lastFetch > 30_000) {
-                    runCatching { WefunkApi.radioNow() }.onSuccess { radio = it }
-                    lastFetch = now
-                }
+                radio = WefunkRadio.at()
                 delay(1_000)
             }
         }
@@ -123,16 +118,15 @@ class PlayerScreen(sealedActivity: SealedLightActivity) : SimpleLightScreen<Unit
             if (r == null) {
                 LightText("Live stream", variant = LightTextVariant.Detail, lighten = true)
             } else {
-                val index = r.show.trackIndexAt(r.positionAt(now))
                 LightText("Live · Show ${r.show.number} from ${formatDate(r.show.date)}", variant = LightTextVariant.Detail, lighten = true)
                 LightText(
-                    r.show.tracks.getOrNull(index)?.text ?: "",
+                    r.track?.text ?: "",
                     variant = LightTextVariant.Heading,
                     maxLines = 4,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 0.5f.gridUnitsAsDp()),
                 )
-                r.show.tracks.getOrNull(index + 1)?.let {
+                r.nextTrack?.let {
                     LightText("Next: ${it.text}", variant = LightTextVariant.Detail, lighten = true, maxLines = 2,
                         overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 0.75f.gridUnitsAsDp()))
                 }

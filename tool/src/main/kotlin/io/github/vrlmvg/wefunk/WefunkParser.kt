@@ -36,8 +36,40 @@ data class RadioNow(
     val show: Show,
     val positionMs: Long,
     val fetchedAtMs: Long,
+    /** The show the stream plays after [show]; the same response carries its playlist. */
+    val next: Show? = null,
 ) {
     fun positionAt(nowMs: Long): Long = positionMs + (nowMs - fetchedAtMs)
+
+    /** The show and position playing at [nowMs], or null once both known shows have ended. */
+    fun at(nowMs: Long): LiveMoment? {
+        val position = positionAt(nowMs)
+        if (show.durationMs <= 0 || position < show.durationMs) return LiveMoment(show, position)
+        val next = next ?: return null
+        val nextPosition = position - show.durationMs
+        return if (next.durationMs <= 0 || nextPosition < next.durationMs) LiveMoment(next, nextPosition) else null
+    }
+
+    /**
+     * When this response stops describing the stream: after the next show ends. Without
+     * durations to go on, check again in a few minutes.
+     */
+    val refreshAtMs: Long
+        get() {
+            val nextDuration = next?.durationMs ?: 0
+            if (show.durationMs <= 0 || nextDuration <= 0) return fetchedAtMs + FALLBACK_REFRESH_MS
+            return fetchedAtMs + (show.durationMs - positionMs) + nextDuration
+        }
+
+    private companion object {
+        const val FALLBACK_REFRESH_MS = 5 * 60_000L
+    }
+}
+
+data class LiveMoment(val show: Show, val positionMs: Long) {
+    val trackIndex: Int get() = show.trackIndexAt(positionMs)
+    val track: Track? get() = show.tracks.getOrNull(trackIndex)
+    val nextTrack: Track? get() = show.tracks.getOrNull(trackIndex + 1)
 }
 
 /** An archive page and the numbers of the other archive pages it links to. */
@@ -93,7 +125,19 @@ object WefunkParser {
         val root = json.parseToJsonElement(body) as JsonObject
         val stream = root["stream"] as? JsonObject ?: throw WefunkException("Radio info unavailable.")
         val date = stream["current_showdate"]?.jsonPrimitive?.contentOrNull ?: throw WefunkException("Radio info unavailable.")
-        val info = (root["showinfo"] as? JsonObject)?.get(date) as? JsonObject ?: throw WefunkException("Radio info unavailable.")
+        val showInfo = root["showinfo"] as? JsonObject
+        val info = showInfo?.get(date) as? JsonObject ?: throw WefunkException("Radio info unavailable.")
+        val nextDate = stream["next_showdate"]?.jsonPrimitive?.contentOrNull
+        val nextInfo = nextDate?.let { showInfo[it] as? JsonObject }
+        return RadioNow(
+            show = radioShow(date, info, stream["current_duration_ms"]?.jsonPrimitive?.longOrNull),
+            positionMs = stream["current_position_ms"]?.jsonPrimitive?.longOrNull ?: 0L,
+            fetchedAtMs = fetchedAtMs,
+            next = if (nextDate != null && nextInfo != null) radioShow(nextDate, nextInfo, null) else null,
+        )
+    }
+
+    private fun radioShow(date: String, info: JsonObject, durationMs: Long?): Show {
         val tracks = (info["playlist"] as? JsonArray).orEmpty().map { element ->
             val o = element as JsonObject
             Track(
@@ -103,16 +147,12 @@ object WefunkParser {
         }
         val number = info["show_link"]?.jsonPrimitive?.contentOrNull?.substringAfterLast('/')?.toIntOrNull()
             ?: ((info["prev_shownum"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0) + 1)
-        return RadioNow(
-            show = Show(
-                number = number,
-                date = date,
-                description = "",
-                durationMs = stream["current_duration_ms"]?.jsonPrimitive?.longOrNull ?: 0L,
-                tracks = tracks,
-            ),
-            positionMs = stream["current_position_ms"]?.jsonPrimitive?.longOrNull ?: 0L,
-            fetchedAtMs = fetchedAtMs,
+        return Show(
+            number = number,
+            date = date,
+            description = "",
+            durationMs = durationMs ?: info["durationms"]?.jsonPrimitive?.longOrNull ?: 0L,
+            tracks = tracks,
         )
     }
 
