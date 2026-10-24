@@ -7,12 +7,21 @@ import io.ktor.client.request.header
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.isSuccess
 import java.security.SecureRandom
+import java.util.concurrent.TimeUnit
 
 private const val SITE = "https://www.wefunkradio.com"
 
 /** Fetches WEFUNK's public pages and builds stream URLs the same way its web player does. */
 object WefunkApi {
-    private val client = HttpClient(OkHttp) { expectSuccess = false }
+    private val client = HttpClient(OkHttp) {
+        expectSuccess = false
+        engine {
+            config {
+                connectTimeout(15, TimeUnit.SECONDS)
+                readTimeout(30, TimeUnit.SECONDS)
+            }
+        }
+    }
 
     suspend fun latestShows(): ShowPage = WefunkParser.parseShowList(get("/shows/"))
 

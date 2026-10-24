@@ -163,8 +163,8 @@ object WefunkParser {
             when (val e = m.groupValues[1]) {
                 "amp" -> "&"; "lt" -> "<"; "gt" -> ">"; "quot" -> "\""; "apos" -> "'"; "nbsp" -> " "
                 else -> {
-                    val code = if (e.startsWith("#x") || e.startsWith("#X")) e.drop(2).toInt(16) else e.drop(1).toInt()
-                    String(Character.toChars(code))
+                    val code = if (e.startsWith("#x") || e.startsWith("#X")) e.drop(2).toIntOrNull(16) else e.drop(1).toIntOrNull()
+                    code?.takeIf(Character::isValidCodePoint)?.let { String(Character.toChars(it)) } ?: m.value
                 }
             }
         }

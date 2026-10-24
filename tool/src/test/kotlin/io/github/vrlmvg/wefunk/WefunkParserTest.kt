@@ -82,4 +82,9 @@ class WefunkParserTest {
         assertEquals(untilCurrentEnds + 7_193_756, radio.refreshAtMs)
         assertNull(radio.at(radio.refreshAtMs))
     }
+
+    @Test
+    fun badEntitiesDontBreakParsing() {
+        assertEquals("A &#1114112; B", WefunkParser.text("A &#1114112; <b>B</b>"))
+    }
 }

@@ -12,6 +12,7 @@ import com.thelightphone.sdk.audio.NO_MEDIA_ITEM
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -32,6 +33,8 @@ sealed interface Playing {
 object WefunkPlayer {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var player: LightAudioPlayer? = null
+    /** Automatic reconnects since playback last ran; reset by playing or by the user starting something. */
+    private var retries = 0
 
     private val _playing = MutableStateFlow<Playing?>(null)
     val playing: StateFlow<Playing?> = _playing.asStateFlow()
@@ -51,14 +54,26 @@ object WefunkPlayer {
             if (!p.awaitReady()) return@launch
             _ready.value = true
             if (p.currentMediaItemIndex.value != NO_MEDIA_ITEM && _playing.value == null) restore(p)
+            launch { p.isPlaying.collect { if (it) retries = 0 } }
             p.error.collect { error ->
-                // Signed show URLs expire after 6 hours: fetch a fresh one and carry on where we were.
-                val current = _playing.value
-                if (error?.kind == LightAudioErrorKind.Source && current is Playing.ShowPlayback) {
-                    val at = p.positionMs.value
-                    p.replaceMediaItem(0, showItem(current.show))
-                    p.play()
-                    seekWhenLoaded(p, at)
+                // Network drops, and signed show URLs expire after 6 hours: reconnect with a fresh URL and
+                // carry on where we were. Backs off and gives up after a few tries so a dead mirror or
+                // no connection doesn't turn into a tight retry loop.
+                if (error?.kind != LightAudioErrorKind.Source || retries >= MAX_RETRIES) return@collect
+                retries++
+                val at = p.positionMs.value
+                delay(RETRY_DELAY_MS * retries)
+                when (val current = _playing.value) {
+                    Playing.Radio -> {
+                        p.setMediaQueue(listOf(radioItem()))
+                        p.play()
+                    }
+                    is Playing.ShowPlayback -> {
+                        p.replaceMediaItem(0, showItem(current.show))
+                        p.play()
+                        seekWhenLoaded(p, at)
+                    }
+                    null -> Unit
                 }
             }
         }
@@ -66,21 +81,21 @@ object WefunkPlayer {
 
     fun playRadio() {
         val p = player ?: return
+        retries = 0
         _playing.value = Playing.Radio
-        p.setMediaQueue(
-            listOf(
-                LightAudioItem(
-                    id = RADIO_ID,
-                    source = LightAudioSource.UrlSource(WefunkApi.RADIO_STREAM_URL),
-                    metadata = LightMediaMetadata(title = "Wefunk Radio", artist = "Live stream"),
-                ),
-            ),
-        )
+        p.setMediaQueue(listOf(radioItem()))
         p.play()
     }
 
+    private fun radioItem() = LightAudioItem(
+        id = RADIO_ID,
+        source = LightAudioSource.UrlSource(WefunkApi.RADIO_STREAM_URL),
+        metadata = LightMediaMetadata(title = "Wefunk Radio", artist = "Live stream"),
+    )
+
     fun playShow(show: Show, fromMs: Long = 0) {
         val p = player ?: return
+        retries = 0
         val current = _playing.value
         if (current is Playing.ShowPlayback && current.show.number == show.number) {
             p.seekTo(fromMs)
@@ -116,6 +131,7 @@ object WefunkPlayer {
     fun skipTrack(direction: Int) {
         val p = player ?: return
         val show = (_playing.value as? Playing.ShowPlayback)?.show ?: return
+        if (show.tracks.isEmpty()) return
         val position = p.positionMs.value
         val index = show.trackIndexAt(position)
         val target = when {
@@ -149,6 +165,8 @@ object WefunkPlayer {
         metadata = LightMediaMetadata(title = "WEFUNK Show ${show.number}", artist = formatDate(show.date), durationMs = show.durationMs),
     )
 
+    private const val MAX_RETRIES = 3
+    private const val RETRY_DELAY_MS = 3_000L
     private const val RADIO_ID = "wefunk-radio"
     private const val SHOW_ID_PREFIX = "wefunk-show-"
 }
